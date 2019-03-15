@@ -6,6 +6,12 @@ Build with SMS Two-Factor Authentication (SMS-2FA) helps keep your user accounts
 
 This project is built using [Flask](http://flask.pocoo.org/) web framework.
 
+1. Install Dependencies.
+
+    ```bash
+    pip3 install -r requirements.txt
+    ```
+
 1. Start the server.
 
     ```bash
