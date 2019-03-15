@@ -1,0 +1,35 @@
+# Flask
+Flask==0.10.1
+
+# Flask components for forms/database/bootstrap
+Flask-Migrate==1.7.0
+Flask-Script==2.0.5
+Flask-SQLAlchemy==2.1
+Flask-Login==0.3.2
+Flask-WTF==0.9.2
+Flask-Bootstrap==3.3.5.7
+Flask-Session==0.3.1
+
+# Analytics
+Flask-Track-Usage==2.0.0
+
+# External libraries
+SQLAlchemy==1.0.11
+twilio==6.9.0
+passlib==1.6.5
+bcrypt==3.1.5
+phonenumbers==8.3.0
+pysocks==1.6.6
+stripe==2.10.1
+pyopenssl==18.0.0
+geocode==1.38.1
+boto3==1.9.63
+beautifulsoup4==4.6.3
+
+# Testing
+unittest2==1.1.0
+coverage==4.0.3
+xmlunittest==0.3.2
+lxml==4.2.5
+mock==2.0.0
+markdown==3.0.1

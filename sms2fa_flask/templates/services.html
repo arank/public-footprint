@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block content %}
+<h3>Connect Your Data From These Services to Explore Them <a href='/footprint'>In Footprint</a>:</h3>
+{% for service in connected_services %}
+	<h5>{{ service.name }}</h5>
+	<a href='/connect/{{ service.id }}'>
+		<img 
+		src='/static/images/{{ service.icon }}' width="100" height="100">
+	</a><i>connected</i>
+{% endfor %}
+{% for service in unconnected_services %}
+	<h5>{{ service.name }}</h5>
+	<a href='/connect/{{ service.id }}'>
+		<img 
+		style="-webkit-filter: grayscale(100%);filter: grayscale(100%);" 
+		src='/static/images/{{ service.icon }}' width="100" height="100">
+	</a><i>unconnected</i>
+{% endfor %}
+{% endblock %}

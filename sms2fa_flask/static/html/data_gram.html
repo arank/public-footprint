@@ -1,0 +1,973 @@
+<p>This App allows you to explore the data that Instagram has collected on you, stored on you, and publically exposed about you in an intuitive and interactive way.</p>
+<h4>Time Range of Data to Visualize</h4>
+<div id="footprint">
+</div>
+<h4>Addiction Profile</h4>
+<p>A Chart aggregating all your interactions on Instagram over time to show you know if you are becoming more or less addicted to the app. Click on any Series at the bottom of the Chart to enable or disable it.</p>
+<div id="footprint-main">
+</div>
+<!-- <h4>Chat Profile</h4> -->
+<!-- <p>A Bubble Graph as well as a Chart</p> -->
+<h4>"Like" Profile</h4>
+<p>A Bubble Graph aggregating all they "Likes" you have given to other users. Hover over the Bubbles or Edges of the Graph to view exactly how many "Likes" they represent.</p>
+<div id="footprint-social">
+</div>
+<h4>Public Profile</h4>
+<p> A Map vizualizing the location trail publically exposed by the Geo-Tagged Posts and Stories you have uploaded as well as a Wordcloud of the captionsfor the Posts and Stories you have posted. Click on any Icon on the Map to view the time it was captured by Instagram</p>
+<div id="footprint-map">
+</div>
+<div id="footprint-profile">
+</div>
+
+<link rel="stylesheet" href="/static/apps/data_gram/css/content.css">
+
+<link rel="stylesheet" href="/static/apps/venmo_trail/css/jquery-ui.css">
+<link rel="stylesheet" href="/static/apps/uber_tracks/css/mapbox.css">
+
+<script src="/static/apps/venmo_trail/js/jquery-ui.js"></script>
+<script src="/static/apps/venmo_trail/js/jquery.easing.min.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.layout.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.geom.js"></script>
+<script src="/static/apps/venmo_trail/js/highcharts.js"></script>
+
+<script src="/static/apps/uber_tracks/js/mapbox.js"></script>
+<script src="/static/apps/uber_tracks/js/leaflet-heat.js"></script>
+<script src="/static/apps/uber_tracks/js/leaflet-polylinedecorator.js"></script>
+
+<script src="/static/apps/data_gram/js/wordcloud.js"></script>
+
+<script type="text/javascript">
+
+	// Map Variables
+	var accessToken = 'pk.eyJ1IjoiYXJhbmtoYW5uYSIsImEiOiI3NjkyYzU3ODQwOTc1NzRiODYxN2E5NmJiODdjOTgzYyJ9.Lh8kTSMXR8K68UsVtrB_Xg'
+	L.mapbox.accessToken = accessToken;
+	
+	// Map object
+	var map = null;
+	var postHeat = null;
+	var polylines = [];
+
+	var like_list = [];
+	var post_list = [];
+	var comment_list = [];
+	var search_list = [];
+
+	var follow_interaction_list = [];
+	var user_message_list = [];
+
+	// Date range of the data to visualize
+	var to_val = Date.now();
+	var from_val = Date.now();
+
+	// The datetime of the oldest transaction stored locally
+	var oldest_retrieved = Date.now();
+	var latest_retrieved = null;
+
+	// Is the bubble graph or the chart the currently selected visualization
+	var loading = false;
+
+	// The JSON for the currently selected user
+	var current_user = null;
+
+
+	$( document ).ready(function() {
+
+		// Extracts post date
+		function extractPost(post){
+			post['created_time'] = Date.parse(post.taken_at);
+			return post;
+		}
+
+		function extractSearch(search){
+			search['created_time'] = Date.parse(search.time);
+			return search;
+		}
+
+		// Extracts like date, picture, name etc.
+		function extractLike(like){
+
+			var like_dict = {
+				'created_time': Date.parse(like[0]),
+				'username': like[1],
+				'type': like[2],
+				'user': like[3]
+			};
+
+			return like_dict;
+		}
+
+		function extractComment(comment){
+
+			var comment_dict = {
+				'created_time': Date.parse(comment[0]),
+				'comment': comment[1],
+				'post_owner': comment[2],
+				'type': comment[3],
+				'user': comment[4]
+			};
+
+			return comment_dict;
+		}
+
+		function extractFollowInteractions(follows){
+			var interactions = [];
+			var to_extract = [
+				follows.follow_requests,
+				follows.following,
+				follows.following_hashtags,
+				follows.blocked
+			];
+			$.each(to_extract, function(index, list){
+				$.each(list, function(index, f){
+					var interaction = {
+						'created_time': Date.parse(f[1]),
+						'user': f[0]
+					};
+					interactions.push(interaction);
+				});
+			});
+			return interactions;
+		}
+
+
+		function extractUserMessages(user, messages){
+			var user_messages = [];
+			$.each(messages, function(index, chat){
+				$.each(chat.conversation, function(index, message){
+					if(message.sender == user){
+						message['created_time'] = Date.parse(message.created_at);
+						user_messages.push(message);
+					}
+				});
+			});
+			return user_messages;
+		}
+
+
+		$.get("main_user", function( user_data ) {	
+			current_user = JSON.parse(user_data);
+
+			$.get("posts", function( post_data ) { // my posts
+				var posts = JSON.parse(post_data);
+				$.each(posts, function(index, raw_post){
+					var post = extractPost(raw_post);
+					post_list.push(post);
+				});
+				// console.log(post_list);
+
+				$.get("messages", function( msg_data ) { // all conversation data
+					var msgs = JSON.parse(msg_data);
+					user_message_list = extractUserMessages(current_user.username, msgs);
+					// console.log(user_message_list);
+				
+					$.get("follows", function( follow_data ) { // my follows
+						var follows = JSON.parse(follow_data);
+						follow_interaction_list = extractFollowInteractions(follows);
+						// console.log(follow_interaction_list);
+
+						$.get("searches", function( search_data ) { // my searches
+							var searches = JSON.parse(search_data);
+							$.each(searches, function(index, raw_search){
+								var search = extractSearch(raw_search);
+								search_list.push(search);
+							});
+							// console.log(search_list);
+
+							$.get("comments", function( comment_data ) { // my comments
+								var comments = JSON.parse(comment_data);
+								$.each(comments, function(index, raw_comment){
+									var comment = extractComment(raw_comment);
+									comment_list.push(comment);
+								});
+								// console.log(comment_list);
+
+								$.get("likes", function( like_data ) { 
+									var likes = JSON.parse(like_data);
+									$.each(likes, function(index, raw_like){
+										var like = extractLike(raw_like);
+										like_list.push(like);
+									});
+									// console.log(like_list);
+
+									var interaction_lists = [follow_interaction_list, user_message_list, search_list, comment_list, post_list, like_list];
+
+									$.each(interaction_lists, function(index, interaction_list){
+
+										$.each(interaction_list, function(index, interaction){
+											if(oldest_retrieved > interaction.created_time){
+												oldest_retrieved = interaction.created_time;
+											}
+											if(latest_retrieved === null || latest_retrieved < interaction.created_time){
+												latest_retrieved = interaction.created_time;
+											}
+										});
+									});
+
+									// Re-render the full vizualization on the data
+									$("#to").datepicker("setDate", new Date(latest_retrieved));
+						        	$("#from").datepicker("setDate", new Date(oldest_retrieved));
+						        	from_val = oldest_retrieved;
+						        	to_val = latest_retrieved;
+						        	renderPostWordCloud(oldest_retrieved, latest_retrieved);
+						        	renderLikeBubbles(oldest_retrieved, latest_retrieved);
+						        	renderPostMap(oldest_retrieved, latest_retrieved);
+						        	renderInteractionChart(oldest_retrieved, latest_retrieved);
+						        	// TODO add chat bubbles
+					        	});
+
+							});
+				    	});
+				    });
+	    		});
+			});
+	    });
+
+		// Build the vizualisation
+		var dateTab = document.createElement('div');
+		dateTab.id = 'date-tab';
+		$('#date-tab').css('height', '400px');
+		$('#date-tab').css('width', '100%');
+		$('#footprint').prepend(dateTab);
+
+		// Set up date selectors
+		var fromDate =  document.createElement('input');
+		fromDate.id = 'from';
+		$('#date-tab').append(fromDate);
+		var toDate =  document.createElement('input');
+		toDate.id = 'to';
+		$('#date-tab').append(toDate);
+
+		// set up rerendering on date change
+		$( "#from" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, true);
+    			}
+    		}
+  		});
+		$( "#to" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, false);
+    			}
+    		}
+  		});
+
+
+		// Insert div for map
+		var mapTab =  document.createElement('div');
+		mapTab.id = 'map';
+		$('#footprint-map').prepend(mapTab);
+
+		// Make switcher for "hotspot" map
+		map = L.mapbox.map('map', 'mapbox.light');
+
+		// Creates animations
+		function rerender(dateText, isFrom){
+			if(isFrom != null && dateText != null){
+				var date = Date.parse(dateText);
+				if(isFrom){
+					from_val = date;
+				}else{
+					to_val = date;
+				}
+			}
+			// Automatically render with correct function, parameter values and order
+			var diff = to_val - from_val;
+
+			if(diff > 0){
+				renderPostWordCloud(from_val, to_val);
+				renderLikeBubbles(from_val, to_val);
+				renderPostMap(from_val, to_val);
+				renderInteractionChart(from_val, to_val);
+			}else if(diff < 0){
+				renderPostWordCloud(to_val, from_val);
+				renderLikeBubbles(to_val, from_val);	
+				renderPostMap(to_val, from_val);
+				renderInteractionChart(to_val, from_val);			
+			}else{
+				renderPostWordCloud(from_val, to_val+oneDay);
+				renderLikeBubbles(from_val, to_val+oneDay);
+				renderPostMap(from_val, to_val+oneDay);
+				renderInteractionChart(from_val, to_val+oneDay);
+			}
+		}
+
+	});
+
+
+	// Generate get a new date one jump away from the old_date
+	function getNewDate(resolution, jump, old_date){
+		cur_date = new Date(old_date);
+		if(resolution == 'd'){
+			return cur_date.setDate(cur_date.getDate() + jump);
+		}else if(resolution == 'h'){
+			return cur_date.setHours(cur_date.getHours() + jump);
+		}else if(resolution == 'w'){
+			return cur_date.setDate(cur_date.getDate() + (jump*7));
+		}else if(resolution == 'm'){
+			return cur_date.setDate(cur_date.getDate() + (jump*30));
+		}
+	}
+
+	// Generate a range of dates with a certain resolution bewteen start and end dates
+	function generateRange(from, to, resolution){
+		var range = [];
+		var end_date =  new Date(getNewDate(resolution, 1, to));
+		var cur_date = new Date(from);
+		while(cur_date.getTime() < end_date.getTime()){
+			var mini_range = [cur_date];
+			cur_date =  new Date(getNewDate(resolution, 1, cur_date.getTime()));
+			mini_range.push(cur_date);
+			if(mini_range[1].getTime() < to){
+				range.push(mini_range);
+			}else{
+				mini_range[1] = new Date(to);
+				range.push(mini_range);
+				break;
+			}
+		}
+		return range;
+	}
+
+	// Turns a range of date objects into human readable string
+	function toRangeString(range, resolution){
+		var start_range = range[0].toString().split(" ");
+		var end_range = range[1].toString().split(" ");
+		if(resolution == 'h'){
+			return start_range[1] +" "+ start_range[2] +" "+start_range[4]+" to "+end_range[1] +" "+ end_range[2]+" "+end_range[4];
+		}else{
+			return start_range[1] +" "+ start_range[2] + " to "+end_range[1] +" "+ end_range[2];
+		}
+	}
+
+	// Aggregate messages, likes, comments, posts/stories, follows, searches to get "addition" over time
+	function renderInteractionChart(from, to){
+
+		var diff = to - from;
+		var oneDay = 24*60*60*1000; // hours*minutes*seconds*milliseconds
+
+		// Set range resolution appropriately
+		var diffDays = Math.round(Math.abs(diff)/(oneDay));
+		var resolution = 'w';
+		if(diffDays <= 2){
+			resolution = 'h';
+		}else if(diffDays <= 31){
+			resolution = 'd';
+		}else if(diffDays <= 364){
+			resolution = 'w';
+		}else{
+			resolution = 'm';
+		}
+
+		// Remove old tab
+		$('#interaction-chart').remove();
+
+		// Insert div
+		var chartTab =  document.createElement('div');
+		chartTab.id = 'interaction-chart';
+		$('#footprint-main').prepend(chartTab);
+
+		var current_range = generateRange(from, to, resolution);
+		
+		var interaction_lists = [
+			[follow_interaction_list, 'followed'], 
+			[user_message_list, 'messaged'], 
+			[search_list, 'searched'], 
+			[comment_list, 'commented'], 
+			[post_list, 'posted'], 
+			[like_list, 'liked']
+		];
+
+		// Load data into chart form
+		var interaction_dict = {};
+
+		$.each(interaction_lists, function(index, interaction_list){
+			var series = interaction_list[1];
+			
+			// Set up time series
+			interaction_dict[series] = [];
+			for(var i=0; i<current_range.length; i++){
+				interaction_dict[series].push(0);
+			}
+
+			$.each(interaction_list[0], function(index, interaction){
+				// Bucket each interaction in range
+				for(var i=0; i<current_range.length; i++){
+					if(interaction.created_time >= current_range[i][0].getTime() && interaction.created_time < current_range[i][1].getTime()){
+						 interaction_dict[series][i] += 1;
+						 break;
+					}
+				}
+			});
+		});
+
+		var display_series = [];
+		for (var key in interaction_dict) {
+			var display_interaction =  {'name': key, 'data': interaction_dict[key]};
+			display_series.push(display_interaction);
+		}
+
+		var categories = [];
+		for (var key in current_range) {
+			categories.push(toRangeString(current_range[key], resolution));
+		}
+
+		// TODO click to deep dive on summary interactions
+		$('#interaction-chart').highcharts({
+		    chart: {
+		        type: 'area'
+		    },
+		    title: {
+		        text: 'Your Instagram Addiction'
+		    },
+		    subtitle: {
+		        text: 'Aggregate interactions on Instagram over time'
+		    },
+		    xAxis: {
+		        categories: categories,
+		        tickmarkPlacement: 'on',
+		        title: {
+		            enabled: false
+		        }
+		    },
+		    yAxis: {
+		        title: {
+		            text: 'Occurences'
+		        },
+		    },
+		    plotOptions: {
+		        area: {
+		            stacking: 'normal',
+		            lineColor: '#666666',
+		            lineWidth: 1,
+		            marker: {
+		                lineWidth: 1,
+		                lineColor: '#666666'
+		            }
+		        }
+		    },
+		    series: display_series
+		});
+
+	}
+
+	// TODO switch between heatmap and maruaders trace
+	function renderPostMap(from, to){
+
+		var is_heat = false;
+
+        // Create counter and update it to most recent
+		// var counterDiv = document.createElement('div');
+		// counterDiv.id = 'counter';
+		// $('#button-container').append(counterDiv);
+		// $('#counter').text('Points: 0');
+		for(var i=0; i<polylines.length; i++){
+			polylines[i].remove();
+		}
+
+		// Creates a new map layer for a user's location
+		function createUserLayer(latitude, longitude, time) {
+			var date =  new Date(time);
+			var layer = L.mapbox.featureLayer();
+			var geoJSON = {
+			    type: 'Feature',
+			    geometry: {
+			        type: 'Point',
+			        // coordinates here are in longitude, latitude order
+			        coordinates: [
+			          longitude,
+			          latitude 
+			        ]
+			    },
+			    properties: {
+			        title: "Post Location",
+			        description: 'Posted at: '+date.toGMTString(),
+			        icon: {
+			        	className: "dot-"+time,
+			        	// TODO make this the acutal post thumbnail
+			        	iconUrl: "https://instagram-brand.com/wp-content/uploads/2016/11/app-icon2.png",
+			        	iconSize: [20, 20],
+			        	iconAnchor: [10,10],
+			        	popupAnchor:[0,-10]
+			        }
+			    }
+			}
+
+			// Set pictures as icons
+			layer.on("layeradd", function(e) {
+			    var marker = e.layer;
+			    var feature = marker.feature;
+			    marker.setIcon(L.icon(feature.properties.icon));
+			});
+
+			// Transition to zoom in on user
+			// layer.on('click', function(e) {
+			// });
+
+			// Add layer's Json
+			layer.setGeoJSON(geoJSON);
+
+			// Add layers to map list
+			return {
+				layer: layer,
+				time: time,
+				latlng: {
+					lat: latitude,
+					lng: longitude
+				}
+			};
+		}
+
+		function updateOpacities(layers) {
+			var min = Number.MAX_VALUE;
+			var max = 0;
+			for(var i=0; i<layers.length; i++){
+				if(layers[i]["time"] > max){
+					max = layers[i]["time"];
+				}
+				if(layers[i]["time"] < min){
+					min = layers[i]["time"];
+				}
+			}
+
+			for(var i=0; i<layers.length; i++){
+				// Opacity is set to % of total range with 0.3 as floor
+				var calcOpacity = (((layers[i]["time"] - min)/(max - min))*0.7) + 0.3;
+				$('.dot-'+layers[i]["time"]).css({opacity: calcOpacity});
+			}
+		}
+
+		// Focus on a specific user and display just their search history on the map
+		function renderTrail(layers) {
+			var line = [];
+			var polyline_options = {
+				color: '#bc2a8d'
+			};
+			var sorted = layers.sort(function(a,b) {return a['time'] - b['time']});
+			for(var i=0; i<sorted.length; i++){
+				polylines.push(layers[i]["layer"]);
+				layers[i]["layer"].addTo(map);
+				line.push(layers[i]["latlng"]);
+			}
+			var polyline = L.polyline(line, polyline_options);
+			polylines.push(polyline);
+			polyline.addTo(map);
+			var polyarrow = L.polylineDecorator(polyline, {
+						    patterns: [
+							    {offset: 0, repeat: 50, symbol: L.Symbol.arrowHead({pixelSize: 8, polygon: false, pathOptions: {stroke: true, color:'#e95950'}})}
+						    ]
+						});
+			polyarrow.addTo(map);
+			polylines.push(polyarrow);
+
+			updateOpacities(layers);
+		}
+
+		var latlngs = [];
+		var layers = [];
+		$.each(post_list, function(index, post){
+			if(post.created_time >= from && post.created_time < to && "loaded_location" in post && !(post.loaded_location==null) ){
+				var orig = [post.loaded_location.lat, post.loaded_location.lng];
+				latlngs.push(orig);
+				layers.push(createUserLayer(post.loaded_location.lat, post.loaded_location.lng, post.created_time));
+			}
+		});
+
+		if(is_heat){
+			// TODO make heat maps different colors for posts and stories
+			if(!(locationHeat == null)){
+				locationHeat.setLatLngs(latlngs);
+				locationHeat.redraw();
+			}else{
+				locationHeat = L.heatLayer(latlngs, {
+			        radius : 15, // default value
+			        blur : 10, // default value
+			        gradient : {1: 'green'}, // Values can be set for a scale of 0-1
+			        minOpacity: 0.7
+		    	}).addTo(map);
+			}
+		}else{
+			renderTrail(layers);
+		}
+	}
+
+	function renderPostWordCloud(from, to){
+
+		// Remove old tab
+		$('#cloud-tab').remove();
+
+		// Insert div for wordcloud
+		var cloudTab =  document.createElement('div');
+		cloudTab.id = 'cloud-tab';
+		$('#footprint-profile').prepend(cloudTab);
+
+		text_string = ""
+		$.each(post_list, function(index, post){
+			if(post.created_time >= from && post.created_time < to){
+				text_string = text_string+" "+post.caption
+			}
+		});
+
+        var common = "i,me,my,myself,we,us,our,ours,ourselves,you,your,yours,yourself,yourselves,he,him,his,himself,she,her,hers,herself,it,its,itself,they,them,their,theirs,themselves,what,which,who,whom,whose,this,that,these,those,am,is,are,was,were,be,been,being,have,has,had,having,do,does,did,doing,will,would,should,can,could,ought,i'm,you're,he's,she's,it's,we're,they're,i've,you've,we've,they've,i'd,you'd,he'd,she'd,we'd,they'd,i'll,you'll,he'll,she'll,we'll,they'll,isn't,aren't,wasn't,weren't,hasn't,haven't,hadn't,doesn't,don't,didn't,won't,wouldn't,shan't,shouldn't,can't,cannot,couldn't,mustn't,let's,that's,who's,what's,here's,there's,when's,where's,why's,how's,a,an,the,and,but,if,or,because,as,until,while,of,at,by,for,with,about,against,between,into,through,during,before,after,above,below,to,from,up,upon,down,in,out,on,off,over,under,again,further,then,once,here,there,when,where,why,how,all,any,both,each,few,more,most,other,some,such,no,nor,not,only,own,same,so,than,too,very,say,says,said,shall";
+
+        var word_count = {};
+
+        var words = text_string.split(/[ '\-\(\)\*":;\[\]|{},.!?]+/);
+          if (words.length == 1){
+            word_count[words[0]] = 1;
+          } else {
+            words.forEach(function(word){
+              var word = word.toLowerCase();
+              if (word != "" && common.indexOf(word)==-1 && word.length>1){
+                if (word_count[word]){
+                  word_count[word]++;
+                } else {
+                  word_count[word] = 1;
+                }
+              }
+            })
+          }
+
+        var svg_location = "#cloud-tab";
+        var width = 960;
+        var height = 500;
+
+        var fill = d3.scale.category20();
+
+        var word_entries = d3.entries(word_count);
+
+        var xScale = d3.scale.linear()
+           .domain([0, d3.max(word_entries, function(d) {
+              return d.value;
+            })
+           ])
+           .range([10,100]);
+
+        d3.layout.cloud().size([width, height])
+          .timeInterval(20)
+          .words(word_entries)
+          .fontSize(function(d) { return xScale(+d.value); })
+          .text(function(d) { return d.key; })
+          .rotate(function() { return ~~(Math.random() * 2) * 90; })
+          .font("Impact")
+          .on("end", draw)
+          .start();
+
+        function draw(words) {
+          d3.select(svg_location).append("svg")
+              .attr("width", width)
+              .attr("height", height)
+            .append("g")
+              .attr("transform", "translate(" + [width >> 1, height >> 1] + ")")
+            .selectAll("text")
+              .data(words)
+            .enter().append("text")
+              .style("font-size", function(d) { return xScale(d.value) + "px"; })
+              .style("font-family", "Impact")
+              .style("fill", function(d, i) { return fill(i); })
+              .attr("text-anchor", "middle")
+              .attr("transform", function(d) {
+                return "translate(" + [d.x, d.y] + ")rotate(" + d.rotate + ")";
+              })
+              .text(function(d) { return d.key; });
+        }
+
+        d3.layout.cloud().stop();
+    }
+
+
+    // TODO add (blue line) comment Bubbles option as well
+    // TODO add reverse like data from extension
+	function renderLikeBubbles(from, to){
+
+		// Remove old tab
+		$('#bubble-tab').remove();
+
+		// Insert div for bubbles
+		var bubbleTab =  document.createElement('div');
+		bubbleTab.id = 'bubble-tab';
+		$('#footprint-social').prepend(bubbleTab);
+
+		var ranges = generateRange(from, to, 'd');
+
+		// Load data into graph data structures
+	    var dataset = {nodes: [{name: current_user.username, amt: 1, picture: current_user.profile_pic_url}], edges: []};
+
+	    // TODO limit to top N
+		$.each(like_list, function(index, like){
+			// Aggregates all user's transactions with the current user in the set time range
+			if(like.created_time >= ranges[0][0].getTime() && like.created_time < ranges[ranges.length-1][1].getTime()){
+				index = -1;
+				for(var i = 0; i<dataset.nodes.length; i++){
+					if(dataset.nodes[i]['name'] == like.username){
+						index = i;
+						break;
+					}
+				}
+				if(index == -1){
+					dataset.nodes.push({name: like.username, amt: 0, picture: like.user.picture});
+					index = dataset.nodes.length-1;
+				}
+				dataset.nodes[index].amt += 1;
+				dataset.nodes[0].amt += 1;
+
+				edge_index = -1;
+				for(var i = 0; i<dataset.edges.length; i++){
+					if(dataset.edges[i].source == index){
+						edge_index = i;
+						break;
+					}
+				}
+				if(edge_index == -1){
+					dataset.edges.push({source: index, target: 0, weight: 0});
+					edge_index = dataset.edges.length-1;
+				}
+				dataset.edges[edge_index].weight += 1
+			}
+		});	
+		
+		// Aribitary size of canvas and line scaling size
+		var w = 1000,
+	    h = 600;
+	    var lineSizeScale = Math.min(dataset.nodes.length * 30, 400);
+
+	    var nodes = dataset.nodes;
+		var force = d3.layout.force()
+		    .nodes(nodes)
+		    .links(dataset.edges)
+		    .size([w, h])
+		    .linkDistance(lineSizeScale)
+		    .charge(-300)
+		    .on("tick", tick)
+		    .start();
+
+		var svg = d3.select("#bubble-tab").append("svg:svg")
+		    .attr("width", w)
+		    .attr("height", h);
+
+		// Per-type markers, as they don't inherit styles.
+		svg.append("svg:defs").selectAll("marker")
+		    .data(["suit", "licensing", "resolved"])
+		    .enter().append("svg:marker")
+		    .attr("id", String)
+		    .attr("viewBox", "0 -5 10 10")
+		    .attr("refX", 1.5)
+		    .attr("refY", -1.5)
+		    .attr("markerWidth", 6)
+		    .attr("markerHeight", 6)
+		    .attr("orient", "auto")
+		    .append("svg:path")
+		    .attr("d", "M0,-5L10,0L0,5");
+
+		var path = svg.append("svg:g").selectAll("path.link")
+		    .data(force.links())
+		    .enter().append("svg:path")
+		    .attr("class", function (d) {
+		    	if(d.source.index == 0){
+		    		return "link from"; 
+		    	}
+		    	else{
+		    		return "link to";
+		    	}
+			})
+			.attr("id", function (d) {
+				if(d.source.index == 0){
+		    		return "from-edge-"+d.target.index; 
+		    	}
+		    	else{
+		    		return "to-edge-"+d.source.index;
+		    	}
+			})
+			.style("stroke-width", function(d) { 
+		    	return 3*Math.min(d.weight, 90); // Change line size
+		    })
+		    .on("mouseover", function(d) {
+		    	var id;
+		    	if(d.source.index == 0){
+		    		id = "#from-edge-"+d.target.index; 
+		    	}
+		    	else{
+		    		id = "#to-edge-"+d.source.index;
+		    	}
+		    	$(id).css("stroke-opacity", "1");
+		    })
+		    .on("mouseout", function(d) {
+		    	var id;
+		    	if(d.source.index == 0){
+		    		id = "#from-edge-"+d.target.index; 
+		    	}
+		    	else{
+		    		id = "#to-edge-"+d.source.index;
+		    	}
+		    	$(id).css("stroke-opacity", "0.5");
+		    });
+
+		    path.append("svg:title")
+		    .text(function(d) {
+		    	if(d.source.index == 0) {
+		    		return "Liked by "+dataset.nodes[d.target.index].name+" "+ d.weight +" times.";
+		    	} else {
+		    		return "Liked "+dataset.nodes[d.source.index].name+" "+ d.weight +" times.";
+		    	}
+		    });
+
+		var markerPath = svg.append("svg:g").selectAll("path.marker")
+		    .data(force.links())
+		    .enter().append("svg:path")
+		    .attr("class", function (d) {
+		    	if(d.source.index == 0){
+		    		return "marker_only from"; 
+		    	}
+		    	else{
+		    		return "marker_only to";
+		    	}
+			})
+		    .style("stroke-width", function(d) { 
+		    	return 3*Math.min(d.weight, 90); // Change line size
+		    });
+
+
+		var defs = svg.append("defs").attr("id", "imgdefs");
+
+		var patterns = d3.select("#imgdefs").selectAll("pattern")
+							.data(force.nodes())
+							.enter().append("pattern")
+	                        .attr("id", function(d, idx) {
+	                        	return "profilePicPattern" + idx;
+	                        })
+	                        .attr("height", 1)
+	                        .attr("width", 1)
+	                        .attr("x", "0")
+	                        .attr("y", "0")
+
+
+
+	    var pictureSizeScale = 18; // Change scale (linear scale)
+	    
+	    for(var i = 0; i < patterns[0].length; i++) {
+	    	var d = force.nodes()[i];
+	    	d3.select(patterns[0][i]).append("image")
+	     	.attr("x", 0)
+	     	.attr("y", 0)
+	     	.attr("height", 10 + pictureSizeScale * Math.min(Math.sqrt(d.amt), 15)) // Change circle size
+	     	.attr("width", 10 + pictureSizeScale * Math.min(Math.sqrt(d.amt), 15)) // Change circle size
+	     	.attr("preserveAspectRatio", "none")
+	     	.attr("xlink:href", d.picture);
+	    }
+
+		var circle = svg.append("svg:g").selectAll("circle")
+		    .data(force.nodes())
+		    .enter().append("svg:g")
+		    .call(force.drag)
+		    .append("circle")
+		    .attr("r", function(d) {
+		    	return (10+ Math.min(Math.sqrt(d.amt), 15) * pictureSizeScale)/2; // Change circle size
+		    })
+		    .attr("fill", function(d, idx) {
+		    	return "url(#profilePicPattern"+idx+")";
+		    })
+		    .attr("class", "peopleCircle")
+		    .on("mouseover", function(d) {
+		    	$('#from-edge-'+d.index).css("stroke-opacity", "1");
+		    	$('#to-edge-'+d.index).css("stroke-opacity", "1");
+		    })
+		    .on("mouseout", function(d) {
+		    	$('#from-edge-'+d.index).css("stroke-opacity", "0.5");
+		    	$('#to-edge-'+d.index).css("stroke-opacity", "0.5");
+		    });
+
+		circle.append("svg:title")
+		    .text(function(d) {
+		    	return d.amt+" interactions with "+d.name;
+		    });
+
+		var text = svg.append("svg:g").selectAll("g")
+		    .data(force.nodes())
+		    .enter().append("svg:g");
+
+		// A copy of the text with a thick white stroke for legibility.
+		text.append("svg:text")
+		    .attr("x", 8)
+		    .attr("y", ".31em")
+		    .attr("class", "shadow")
+		    .text(function (d) {
+		    return d.name;
+		});
+
+		text.append("svg:text")
+		    .attr("x", 8)
+		    .attr("y", ".31em")
+		    .text(function (d) {
+		    return d.name;
+		});
+
+		// Use elliptical arc path segments to doubly-encode directionality (thanks to stack overflow)
+		function tick() {
+
+		    path.attr("d", function (d) {
+		        var dx = d.target.x - d.source.x,
+		            dy = d.target.y - d.source.y,
+		            dr = Math.sqrt(dx * dx + dy * dy);
+		        return "M" + d.source.x + "," + d.source.y + "A" + dr + "," + dr + " 0 0,1 " + d.target.x + "," + d.target.y;
+		    });
+
+		    markerPath.attr("d", function (d) {
+		        var dx = d.target.x - d.source.x,
+		            dy = d.target.y - d.source.y,
+		            dr = Math.sqrt(dx * dx + dy * dy);
+
+		        var endX = (d.target.x + d.source.x) / 2;
+		        var endY = (d.target.y + d.source.y) / 2;
+		        var len = dr - ((dr / 2) * Math.sqrt(3));
+		        endX = endX + (dy * len / dr);
+		        endY = endY + (-dx * len / dr);
+
+		        return "M" + d.source.x + "," + d.source.y + "A" + dr + "," + dr + " 0 0,1 " + endX + "," + endY;
+		    });
+
+		    circle.attr("transform", function (d) {
+		        return "translate(" + d.x + "," + d.y + ")";
+		    });
+
+		    text.attr("transform", function (d) {
+		        return "translate(" + d.x + "," + d.y + ")";
+		    });
+		}
+	}
+
+
+	// Multi Part Bubble Graph
+	// function renderChatBubbles(from, to){
+
+	// 	// Remove old tab
+	// 	$('#chats-tab').remove();
+
+	// 	// Insert div
+	// 	var chatsTab =  document.createElement('div');
+	// 	chatsTab.id = 'chats-tab';
+	// 	$('#footprint').prepend(chatsTab);
+
+	// 	// Make multi-user chats their own bubbles
+
+	// }
+
+	// // Get chart and wordcloud for indavidual chat
+	// function renderChatOverview(from, to, chat){
+
+	// 	// Remove old tab
+	// 	$('#chat-chart').remove();
+
+	// 	// Insert div
+	// 	var chatTab =  document.createElement('div');
+	// 	chatTab.id = 'chat-chart';
+	// 	$('#footprint').prepend(chatTab);
+		
+	// 	// TODO click to deep dive on per user series with messages
+	// 	// Add the wordcloud and chart for this chart
+
+	// }
+
+
+</script>

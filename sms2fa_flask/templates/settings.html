@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block content %}
+<h3>My Settings</h1>
+{% if not current_user.email_verified %}
+<h3>Please Verify Your email at {{current_user.email}}</h3>
+<a href='/send_confirmation_email'>
+    <h4 style='color:red'>Re-Send Email Verify Link</h4>
+</a>
+{% endif %}
+<!-- <a href='/payment_history'>
+	<h4>Payment History</h4>
+</a>
+<a href='/manage_payment'>
+	<h4>Payment Methods</h4>
+</a> -->
+<a href='/reset_password'>
+	<h4>Reset Password</h4>
+</a>
+{% endblock %}

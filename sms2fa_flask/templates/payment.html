@@ -1,0 +1,98 @@
+{% extends "layout.html" %}
+{% block content %}
+{% if current_user.email_verified %}
+<h1>Manage Your Payment Method</h1>
+
+{% if card is not none %}
+<!-- List Payment methods on file -->
+<p>Currently using {{card.brand}} ending in {{card.last4}} expiring {{card.exp_month}}/{{card.exp_year}}</p>
+{% endif %}
+
+<form action="#" method="post" id="payment-form">
+  <div class="form-row">
+    <label for="card-element">
+      Enter Credit or Debit Card
+    </label>
+    <div id="card-element">
+      <!-- A Stripe Element will be inserted here. -->
+    </div>
+
+    <!-- Used to display form errors. -->
+    <div id="card-errors" role="alert"></div>
+  </div>
+  <button>Submit Payment</button>
+</form>
+
+<!-- Used to send form with token. -->
+<div id="insert-form"></div>
+
+<script src="https://js.stripe.com/v3/"></script>
+<script type="text/javascript">
+    // Create a Stripe client.
+    var stripe = Stripe('{{key}}');
+
+    // Create an instance of Elements.
+    var elements = stripe.elements();
+
+    // Custom styling can be passed to options when creating an Element.
+    // (Note that this demo uses a wider set of styles than the guide below.)
+    var style = {
+      base: {
+        color: '#32325d',
+        lineHeight: '18px',
+        fontFamily: '"Helvetica Neue", Helvetica, sans-serif',
+        fontSmoothing: 'antialiased',
+        fontSize: '16px',
+        '::placeholder': {
+          color: '#aab7c4'
+        }
+      },
+      invalid: {
+        color: '#fa755a',
+        iconColor: '#fa755a'
+      }
+    };
+
+    // Create an instance of the card Element.
+    var card = elements.create('card', {style: style});
+
+    // Add an instance of the card Element into the `card-element` <div>.
+    card.mount('#card-element');
+
+    // Handle real-time validation errors from the card Element.
+    card.addEventListener('change', function(event) {
+      var displayError = document.getElementById('card-errors');
+      if (event.error) {
+        displayError.textContent = event.error.message;
+      } else {
+        displayError.textContent = '';
+      }
+    });
+
+    // Handle form submission.
+    var form = document.getElementById('payment-form');
+    form.addEventListener('submit', function(event) {
+      event.preventDefault();
+
+      stripe.createToken(card).then(function(result) {
+        if (result.error) {
+          // Inform the user if there was an error.
+          var errorElement = document.getElementById('card-errors');
+          errorElement.textContent = result.error.message;
+        } else {
+          // Send the token to server through the hidden form
+          $('#insert-form').html('<form action="/manage_payment" id="stripe-token" method="post" style="display:none;"><input type="text" name="stripeToken" value="' + encodeURIComponent(JSON.stringify(result.token)) + '" /></form>');
+          $('#stripe-token').submit();
+
+        }
+      });
+    });
+</script>
+
+{% else %}
+<h3>Please Verify Your email at {{current_user.email}} to Add a Payment Method</h3>
+<a href='/send_confirmation_email'>
+    <h4 style='color:red'>Re-Send Email Verify Link</h4>
+</a>
+{% endif %}
+{% endblock %}

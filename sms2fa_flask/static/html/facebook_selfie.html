@@ -1,0 +1,391 @@
+<p>This App allows you to explore the data that Facebook has collected on you, stored on you, and publically exposed about you in an intuitive and interactive way.</p>
+<h4>Time Range of Data to Visualize</h4>
+<div id="footprint">
+</div>
+<h4>Addiction Profile</h4>
+<p>A Chart aggregating all your interactions on Facebook over time to show you know if you are becoming more or less addicted to the app. Click on any Series at the bottom of the Chart to enable or disable it.</p>
+<div id="footprint-main">
+</div>
+
+<link rel="stylesheet" href="/static/apps/venmo_trail/css/jquery-ui.css">
+
+<script src="/static/apps/venmo_trail/js/jquery-ui.js"></script>
+<script src="/static/apps/venmo_trail/js/jquery.easing.min.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.layout.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.geom.js"></script>
+<script src="/static/apps/venmo_trail/js/highcharts.js"></script>
+
+<script src="/static/apps/data_gram/js/wordcloud.js"></script>
+
+
+<script type="text/javascript">
+
+	// Date range of the data to visualize
+	var to_val = Date.now();
+	var from_val = Date.now();
+
+	// The datetime of the oldest transaction stored locally
+	var oldest_retrieved = Date.now();
+	var latest_retrieved = null;
+
+	// Is the bubble graph or the chart the currently selected visualization
+	var loading = false;
+
+	// The JSON for the currently selected user
+	var current_user = null;
+
+	var friends, friending_actions, searches, likes, posts, comments, groups, pokes, follows, logins, ad_interactions, profile_updates, apps, messages, ad_profile, posts_on_my_timeline
+
+	$( document ).ready(function() {
+
+		$.when(
+			$.get("friends", function( friends_data ) {	
+				friends = JSON.parse(friends_data);
+				console.log(friends);
+			}),
+
+			$.get("friending_actions", function( friending_data ) {	
+				friending_actions = JSON.parse(friending_data);
+				console.log(friending_actions); // deleted_friends rejected_requests sent_requests
+			}),
+
+			$.get("searches", function( search_data ) {	
+				searches = JSON.parse(search_data);
+				console.log(searches); 
+			}),
+
+			$.get("likes", function( like_data ) {	
+				likes = JSON.parse(like_data);
+				console.log(likes); // external_likes page_likes post_likes
+			}),
+
+			$.get("posts", function( post_data ) {	
+				posts = JSON.parse(post_data);
+				console.log(posts);		
+			}),
+
+			$.get("comments", function( comment_data ) {	
+				comments = JSON.parse(comment_data);
+				console.log(comments); // comments group_comments
+			}),
+
+			$.get("groups", function( groups_data ) {	
+				groups = JSON.parse(groups_data);
+				console.log(groups);
+			}),
+
+			$.get("pokes", function( pokes_data ) {	
+				pokes = JSON.parse(pokes_data);
+				console.log(pokes); 
+			}),
+			
+			$.get("follows", function( follows_data ) {	
+				follows = JSON.parse(follows_data);
+				console.log(follows); // pages people
+			}),
+
+			$.get("logins", function( logins_data ) {	
+				logins = JSON.parse(logins_data);
+				console.log(logins); // activity
+			}),
+			
+			$.get("ad_interactions", function( ad_interactions_data ) {	
+				ad_interactions = JSON.parse(ad_interactions_data);
+				console.log(ad_interactions); 
+			}),
+
+			$.get("profile_updates", function( profile_updates_data ) {	
+				profile_updates = JSON.parse(profile_updates_data);
+				console.log(profile_updates); 
+			}),
+			
+			$.get("apps", function( apps_data ) {	
+				apps = JSON.parse(apps_data);
+				console.log(apps);
+			}),
+			
+			$.get("messages", function( messages_data ) {	
+				messages = JSON.parse(messages_data);
+				console.log(messages);
+			}),
+
+			$.get("ad_profile", function( ad_profile_data ) {	
+				ad_profile = JSON.parse(ad_profile_data);
+				current_user = ad_profile['profile_information']
+				console.log(ad_profile);
+			}),
+			
+			$.get("posts_on_my_timeline", function( posts_on_my_timeline_data ) {	
+				posts_on_my_timeline = JSON.parse(posts_on_my_timeline_data);
+				console.log(posts_on_my_timeline);
+			})
+
+		).then(function() {
+
+			var interaction_lists = [friends, friending_actions['deleted_friends'], friending_actions['rejected_requests'],
+				friending_actions['sent_requests'], searches, likes['external_likes'], likes['page_likes'],
+				likes['post_likes'], posts, comments['comments'], comments['group_comments'], groups, pokes, follows['pages'],
+				follows['people'], logins['activity'], ad_interactions, profile_updates, apps, messages];
+
+			$.each(interaction_lists, function(index, interaction_list){
+
+				$.each(interaction_list, function(index, interaction){
+					if(oldest_retrieved > interaction.timestamp){
+						oldest_retrieved = interaction.timestamp;
+					}
+					if(latest_retrieved === null || latest_retrieved < interaction.timestamp){
+						latest_retrieved = interaction.timestamp;
+					}
+				});
+			});
+
+			// Timestamp in secs but millis required
+			oldest_retrieved = oldest_retrieved*1000;
+			latest_retrieved = latest_retrieved*1000;
+
+			// Re-render the full vizualization on the data
+			$("#to").datepicker("setDate", new Date(latest_retrieved));
+	    	$("#from").datepicker("setDate", new Date(oldest_retrieved));
+	    	from_val = oldest_retrieved;
+	    	to_val = latest_retrieved;
+			renderInteractionChart(oldest_retrieved, latest_retrieved);
+
+		});
+
+		// Build the vizualisation
+		var dateTab = document.createElement('div');
+		dateTab.id = 'date-tab';
+		$('#date-tab').css('height', '400px');
+		$('#date-tab').css('width', '100%');
+		$('#footprint').prepend(dateTab);
+
+		// Set up date selectors
+		var fromDate =  document.createElement('input');
+		fromDate.id = 'from';
+		$('#date-tab').append(fromDate);
+		var toDate =  document.createElement('input');
+		toDate.id = 'to';
+		$('#date-tab').append(toDate);
+
+		// set up rerendering on date change
+		$( "#from" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, true);
+    			}
+    		}
+  		});
+		$( "#to" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, false);
+    			}
+    		}
+  		});
+
+		// Creates animations
+		function rerender(dateText, isFrom){
+			if(isFrom != null && dateText != null){
+				var date = Date.parse(dateText);
+				if(isFrom){
+					from_val = date;
+				}else{
+					to_val = date;
+				}
+			}
+			// Automatically render with correct function, parameter values and order
+			var diff = to_val - from_val;
+
+			if(diff > 0){
+				renderInteractionChart(from_val, to_val);
+			}else if(diff < 0){
+				renderInteractionChart(to_val, from_val);			
+			}else{
+				renderInteractionChart(from_val, to_val+oneDay);
+			}
+		}
+
+	});
+
+
+// Generate get a new date one jump away from the old_date
+	function getNewDate(resolution, jump, old_date){
+		cur_date = new Date(old_date);
+		if(resolution == 'd'){
+			return cur_date.setDate(cur_date.getDate() + jump);
+		}else if(resolution == 'h'){
+			return cur_date.setHours(cur_date.getHours() + jump);
+		}else if(resolution == 'w'){
+			return cur_date.setDate(cur_date.getDate() + (jump*7));
+		}else if(resolution == 'm'){
+			return cur_date.setDate(cur_date.getDate() + (jump*30));
+		}
+	}
+
+	// Generate a range of dates with a certain resolution bewteen start and end dates
+	function generateRange(from, to, resolution){
+		var range = [];
+		var end_date =  new Date(getNewDate(resolution, 1, to));
+		var cur_date = new Date(from);
+		while(cur_date.getTime() < end_date.getTime()){
+			var mini_range = [cur_date];
+			cur_date =  new Date(getNewDate(resolution, 1, cur_date.getTime()));
+			mini_range.push(cur_date);
+			if(mini_range[1].getTime() < to){
+				range.push(mini_range);
+			}else{
+				mini_range[1] = new Date(to);
+				range.push(mini_range);
+				break;
+			}
+		}
+		return range;
+	}
+
+	// Turns a range of date objects into human readable string
+	function toRangeString(range, resolution){
+		var start_range = range[0].toString().split(" ");
+		var end_range = range[1].toString().split(" ");
+		if(resolution == 'h'){
+			return start_range[1] +" "+ start_range[2] +" "+start_range[4]+" to "+end_range[1] +" "+ end_range[2]+" "+end_range[4];
+		}else{
+			return start_range[1] +" "+ start_range[2] + " to "+end_range[1] +" "+ end_range[2];
+		}
+	}
+
+	// Aggregate messages, likes, comments, posts/stories, follows, searches to get "addition" over time
+	function renderInteractionChart(from, to){
+
+		var diff = to - from;
+		var oneDay = 24*60*60*1000; // hours*minutes*seconds*milliseconds
+
+		// Set range resolution appropriately
+		var diffDays = Math.round(Math.abs(diff)/(oneDay));
+		var resolution = 'w';
+		if(diffDays <= 2){
+			resolution = 'h';
+		}else if(diffDays <= 31){
+			resolution = 'd';
+		}else if(diffDays <= 364){
+			resolution = 'w';
+		}else{
+			resolution = 'm';
+		}
+
+		// Remove old tab
+		$('#interaction-chart').remove();
+
+		// Insert div
+		var chartTab =  document.createElement('div');
+		chartTab.id = 'interaction-chart';
+		$('#footprint-main').prepend(chartTab);
+
+		var current_range = generateRange(from, to, resolution);
+
+		// make sure 'sender_name' is current user
+		var my_messages = [];
+		$.each(messages, function(index, message){
+			if(message['sender_name'] == current_user['profile']['name']['full_name']){
+				my_messages.push(message);
+			}
+		});
+
+		var interaction_lists = [
+			[friends, 'added friend'],
+			[friending_actions['deleted_friends'], 'removed friend'],
+			[friending_actions['rejected_requests'], 'rejected friend'],
+			[friending_actions['sent_requests'], 'requested friend'],
+			[searches, 'searched'],
+			[likes['external_likes'], 'liked site'],
+			[likes['page_likes'], 'liked page'],
+			[likes['post_likes'], 'liked post'],
+			[posts, 'posted'],
+			[comments['comments'], 'commented'],
+			[comments['group_comments'], 'posted in group'], 
+			[pokes, 'poked'],
+			[groups, 'joined group'],
+			[follows['pages'], 'followed page'],
+			[follows['people'], 'followed person'],
+			[logins['activity'], 'logged in'],
+			[ad_interactions, 'clicked ad'],
+			[profile_updates, 'updated profile'],
+			[apps, 'added app'],
+			[my_messages, 'sent message'], // TODO make my_messages
+		];
+
+
+		// Load data into chart form
+		var interaction_dict = {};
+
+		$.each(interaction_lists, function(index, interaction_list){
+			var series = interaction_list[1];
+			
+			// Set up time series
+			interaction_dict[series] = [];
+			for(var i=0; i<current_range.length; i++){
+				interaction_dict[series].push(0);
+			}
+
+			$.each(interaction_list[0], function(index, interaction){
+				// Bucket each interaction in range
+				for(var i=0; i<current_range.length; i++){
+					if(interaction.timestamp*1000 >= current_range[i][0].getTime() && interaction.timestamp*1000 < current_range[i][1].getTime()){
+						 interaction_dict[series][i] += 1;
+						 break;
+					}
+				}
+			});
+		});
+
+		var display_series = [];
+		for (var key in interaction_dict) {
+			var display_interaction =  {'name': key, 'data': interaction_dict[key]};
+			display_series.push(display_interaction);
+		}
+
+		var categories = [];
+		for (var key in current_range) {
+			categories.push(toRangeString(current_range[key], resolution));
+		}
+
+		// TODO click to deep dive on summary interactions
+		$('#interaction-chart').highcharts({
+		    chart: {
+		        type: 'area'
+		    },
+		    title: {
+		        text: 'Your Facebook Addiction'
+		    },
+		    subtitle: {
+		        text: 'Aggregate interactions on Facebook over time'
+		    },
+		    xAxis: {
+		        categories: categories,
+		        tickmarkPlacement: 'on',
+		        title: {
+		            enabled: false
+		        }
+		    },
+		    yAxis: {
+		        title: {
+		            text: 'Occurences'
+		        },
+		    },
+		    plotOptions: {
+		        area: {
+		            stacking: 'normal',
+		            lineColor: '#666666',
+		            lineWidth: 1,
+		            marker: {
+		                lineWidth: 1,
+		                lineColor: '#666666'
+		            }
+		        }
+		    },
+		    series: display_series
+		});
+
+	}
+
+</script>

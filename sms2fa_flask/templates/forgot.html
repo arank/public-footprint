@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>Reset Your Password</h1>
+<p>It seems you forgot your password. Sorry about that! Please enter your email get a reset link.</p>
+<div class="container">
+    <form method="POST" action="{{ url_for('forgot_password') }}" class="form-horizontal">
+        {{ form.csrf_token }}
+        {{ wtf.form_field(form.email, form_type='horizontal') }}
+        <div class='form-group'>
+            <div class='col-sm-offset-2 col-sm-10'>
+                <input type="submit" value="Reset" class="btn btn-success">
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

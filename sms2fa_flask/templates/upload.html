@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<link rel="stylesheet" 
+ href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.4.0/min/dropzone.min.css"/>
+
+<link rel="stylesheet" 
+ href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.4.0/min/basic.min.css"/>
+
+<script type="application/javascript" 
+ src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.4.0/min/dropzone.min.js">
+</script>
+
+<h1>Upload Your {{ service.name }} Data</h1>
+
+<button data-toggle="collapse" data-target="#demo">Instructions</button>
+
+<div id="demo" class="collapse">
+{{service.instructions}}
+</div>
+
+<form method="POST" action='/connect/{{service.id}}' class="dropzone dz-clickable" 
+      id="dropper" enctype="multipart/form-data">
+</form>
+
+<script type="application/javascript">
+    Dropzone.options.dropper = {
+        paramName: 'file',
+        chunking: true,
+        forceChunking: true,
+        url: '/connect/{{service.id}}',
+        maxFilesize: 4250, // megabytes
+        chunkSize: 10000000 // bytes
+    }
+</script>
+
+{% endblock %}

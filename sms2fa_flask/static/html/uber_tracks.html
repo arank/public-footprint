@@ -1,0 +1,650 @@
+<h4>My Rides</h4>
+<div id="footprint">
+</div>
+
+<link rel="stylesheet" href="/static/apps/uber_tracks/css/jquery-ui.css">
+<link rel="stylesheet" href="/static/apps/uber_tracks/css/mapbox.css">
+<link rel="stylesheet" href="/static/apps/uber_tracks/css/marker-cluster.css">
+<link rel="stylesheet" href="/static/apps/uber_tracks/css/content.css">
+<script src="/static/apps/uber_tracks/js/jquery-ui.js"></script>
+<script src="/static/apps/uber_tracks/js/jquery.easing.min.js"></script>
+<script src="/static/apps/uber_tracks/js/highcharts.js"></script>
+<script src="/static/apps/uber_tracks/js/mapbox.js"></script>
+<script src="/static/apps/uber_tracks/js/leaflet-heat.js"></script>
+<script src="/static/apps/uber_tracks/js/leaflet-markercluster.js"></script>
+<script src="/static/apps/uber_tracks/js/leaflet-polylinedecorator.js"></script>
+
+<script type="text/javascript">
+
+	// Map Variables
+	var accessToken = 'pk.eyJ1IjoiYXJhbmtoYW5uYSIsImEiOiI3NjkyYzU3ODQwOTc1NzRiODYxN2E5NmJiODdjOTgzYyJ9.Lh8kTSMXR8K68UsVtrB_Xg'
+	L.mapbox.accessToken = accessToken;
+	
+	// Map object
+	var map = null;
+	var pickupHeat = null;
+	var dropoffHeat = null;
+	var pickupPoints = [];
+	var dropoffPoints = [];
+
+	// var map_id = "arankhanna.m3ankjj3";
+	// Lines between points drawn on map
+	// var polyline = null;
+
+	// Date range of the data to visualize
+	var to_val = Date.now();
+	var from_val = Date.now();
+	// Is the visualization currently loading data
+	var loading = false;
+	// The datetime of the oldest transaction stored locally
+	var oldest_retrieved = Date.now();
+	var latest_retrieved = null;
+	
+	// Data Structures
+	// List of all transactions pulled from the current user's feed.
+	var trans_list = [];
+	var trans_hashes = new Set();
+
+	// List of route layer group
+	var route_layers = [];
+
+	// Map layers for location along w/ corresponding meta data
+	var location_layers = {};
+
+	// Trip orig and dest layers
+	var overlays = null;
+
+
+	// When the document is ready add the toolbar and render the map visualization
+	$( document ).ready(function() {
+		
+
+		// Loads pulled user data into the transaction list in memory
+		function extractTrip(trip){
+			// Check that the trip fits the parameters (i.e. it is a full end to end trip, not a cancellation or fee)
+	    	if(trip.status != "COMPLETED"){
+	    		console.log("incomplete trip");
+				return null;
+			}
+			trip.start_time = Date.parse(trip.start_time);
+			trip.end_time = Date.parse(trip.end_time);
+			// TODO pull when in the day this trip occured (morning evening etc.)
+			// trans_list.push([trip_id, page_num, cost, origin, dest, start_date, end_date]);
+			return trip;
+		}
+
+
+		// Get the user's transactions
+		$.get("trips", function( trip_data ) {
+			console.log("Trips fetched");
+			var trips = JSON.parse(trip_data);
+			$.each(trips['trips'], function(index, trip){
+				var extracted_trip = extractTrip(trip);
+				if(trip != null){
+					trans_list.push(trip);
+					if(oldest_retrieved > extracted_trip.start_time){
+						oldest_retrieved = extracted_trip.start_time;
+					}
+					if(latest_retrieved === null || latest_retrieved < extracted_trip.start_time){
+						latest_retrieved = extracted_trip.start_time;
+					}
+				}
+			});
+
+			from_val = oldest_retrieved;
+			to_val = latest_retrieved;
+			$("#to").datepicker("setDate", new Date(to_val));
+			$("#from").datepicker("setDate", new Date(from_val));
+			renderMap(from_val, to_val);
+		});
+
+		// Set up Mapbox map
+		var mapTab = document.createElement('div');
+		mapTab.id = 'map';
+		$('#footprint').append(mapTab);
+		
+		var map = L.mapbox.map('map', 'mapbox.light');
+		overlays = L.layerGroup().addTo(map);
+
+		// pickupHeat = L.heatLayer([], {
+	 //        radius : 15, // default value
+	 //        blur : 10, // default value
+	 //        gradient : {1: 'green'}, // Values can be set for a scale of 0-1
+	 //        minOpacity: 0.7
+	 //    }).addTo(map);
+
+	 //    dropoffHeat = L.heatLayer([], {
+	 //        radius : 15, // default value
+	 //        blur : 10, // default value
+	 //        gradient : {1: 'red'},
+	 //        minOpacity: 0.7
+	 //    }).addTo(map);
+
+		$('#map').css('position', 'relative');
+		$('#map').css('width', '100%');
+		// $('#map').css('bottom', '60%');
+		$('#map').css('top', '-90%');
+		$('#map').css('height', '500px');
+		$('#map').css('z-index', '500');
+
+		// Set up control panel
+		var dateTab = document.createElement('div');
+		dateTab.id = 'date-tab';
+		$('#footprint').append(dateTab);
+
+		$('#date-tab').css('position', 'relative');
+		$('#date-tab').css('height', '75px');
+		$('#date-tab').css('width', '100%');
+		$('#date-tab').css('top', '90%');
+		$('#date-tab').css('z-index', '500');
+		// $('.container:first').append(dateTab);
+
+		// Set up date selectors
+		var fromDate =  document.createElement('input');
+		fromDate.id = 'from';
+		$('#date-tab').append(fromDate);
+		var toDate =  document.createElement('input');
+		toDate.id = 'to';
+		$('#date-tab').append(toDate);
+		var spend =  document.createElement('div');
+		spend.id = 'spend';
+		$('#date-tab').append(spend);
+
+		// set up rerendering on date change
+		$( "#from" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, true);
+    			}
+    		}
+  		});
+		$( "#to" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, false);
+    			}
+    		}
+  		});
+
+		// If the date changes (or the chart type changes) rerender the currently selected visualization with the new parameters
+		function rerender(dateText, isFrom){
+			if(isFrom != null && dateText != null){
+				var date = Date.parse(dateText);
+				if(isFrom){
+					from_val = date;
+				}else{
+					to_val = date;
+				}
+			}
+
+			// Automatically render with correct function, parameter values and order
+			var diff = to_val - from_val;
+			var oneDay = 24*60*60*1000; // hours*minutes*seconds*milliseconds
+			
+			if(diff > 0){
+				renderMap(from_val, to_val);
+			}else if(diff < 0){
+				renderMap(to_val, from_val);
+			}else{
+				renderMap(from_val-oneDay, to_val);
+			}
+		}
+
+  		function renderMap(from, to){
+			console.log("rendering map");
+		  	// TODO aggregate loaded locations into tranacitons to vet for unreasonable ones (too long distance)
+		  	// Filter out from routes (i.e. add Time of day range filter, day of week range filters, adjust total spend accordingly)
+		    var routes = {};
+
+		    // Clear all exisiting route layers on map
+		    // for(var i=0; i<route_layers.length; i++){
+		    // 	map.removeLayer(route_layers[i]);
+		    // 	route_layers[i].clearLayers();
+		    // }
+		    // route_layers = [];
+
+		    // then remove any previously-displayed marker groups
+		    overlays.clearLayers();
+		    // create a new marker group
+		    var clusterGroup = new L.MarkerClusterGroup({
+				// iconCreateFunction: function(cluster) {
+				// 	return L.divIcon({ html: '<b>' + cluster.getChildCount() + '</b>' });
+				// },
+				// TODO add popup to this
+				// iconCreateFunction: function(cluster) {
+			 //        return L.mapbox.marker.icon({
+			 //          // show the number of markers in the cluster on the icon.
+			 //          'marker-symbol': cluster.getChildCount(),
+			 //          'marker-color': '#422'
+			 //        });
+			 //    },
+				maxClusterRadius:40,
+				zoomToBoundsOnClick: false // To disable click on cluster
+		    }).addTo(overlays);
+
+			// clusterGroup.on('clustermouseover', function(cluster) {
+			// 	// your custom L.MarkerCluster extended with function highlight()
+			// 	// console.log('cluster ' + cluster.layer.getAllChildMarkers().length);
+			// 	var markers = cluster.layer.getAllChildMarkers();
+			// 	for(var i=0; i<markers.length; i++){
+			// 		console.log(markers[i]);
+			// 		// TODO lookup marker in trip lookup table (by coords)
+			// 		// TODO Aggregate trip spend to and from
+			// 		
+			// 		// TODO render lines with ride counts and spend for in and out
+			// 	}
+			// })
+
+		    var totalSpend = 0;
+		    var totalTrips = 0;
+		    var tripList = [];
+
+		    // Add all markers to map here
+			for(var i=0; i<trans_list.length; i++){
+				// Only pull points in the time range we want
+				if(trans_list[i].start_time > from && trans_list[i].start_time < to){
+					var orig = [trans_list[i].start_location.lat, trans_list[i].start_location.lng];
+					var dest = [trans_list[i].end_location.lat, trans_list[i].end_location.lng];
+					
+					pickupPoints.push(orig);
+					dropoffPoints.push(dest);
+
+					// TODO augment total spend w/ incomplete trips
+					totalSpend += trans_list[i].fare;
+					totalTrips += 1;
+
+					// TODO filter trips too long to actually happen from map
+
+					var create_date = new Date(trans_list[i].start_time);
+					var end_date = new Date(trans_list[i].end_time);
+
+				    // Add markers to clusters that fit the filtered criteria to that group.
+				    // TODO add fade to markers depending on time of trip
+				    padding="==============================================\n"
+				    var orig_layer = L.mapbox.featureLayer()
+					var geojson = [{
+						    "type": "Feature",
+						    "geometry": {
+						      	"type": "Point",
+						      	"coordinates": [orig[1], orig[0]]
+						    },
+						    "properties": {
+						    	'marker-color': '#008A00',
+						    	'popupContent': padding+'Start of $'+trans_list[i].fare+' trip from '+
+						    	trans_list[i].start_location.address+' to '+trans_list[i].end_location.address+' on '+ create_date.toString()
+						    }
+						}];
+					orig_layer.setGeoJSON(geojson);
+
+					orig_layer.on('click', function(e) {
+					  var popup = L.popup()
+					   .setLatLng(e.latlng) 
+					   .setContent(e.target._geojson[0].properties['popupContent'])
+					   .openOn(map);
+					});
+				    
+				    clusterGroup.addLayer(orig_layer);
+
+				    var dest_layer = L.mapbox.featureLayer()
+					var geojson = [{
+						    "type": "Feature",
+						    "geometry": {
+						      	"type": "Point",
+						      	"coordinates": [dest[1], dest[0]]
+						    },
+						    "properties": {
+						    	'marker-color': '#ff1a1a',
+						    	'popupContent': padding+'End of $'+trans_list[i].fare+' trip from '+
+						    	trans_list[i].start_location.address+' to '+trans_list[i].end_location.address+' on '+ end_date.toString()
+						    }
+						}];
+					dest_layer.setGeoJSON(geojson);
+
+					dest_layer.on('click', function(e) {
+					  var popup = L.popup()
+					   .setLatLng(e.latlng) 
+					   .setContent(e.target._geojson[0].properties['popupContent'])
+					   .openOn(map);
+					});
+
+				    clusterGroup.addLayer(dest_layer);
+
+				    // Create trip object to aggregate common trips (same origin and dest)
+				    var orig_hash = orig[1].toString()+"#"+orig[0].toString();
+					var dest_hash = dest[1].toString()+"#"+dest[0].toString();
+					var start_date = new Date(trans_list[i].start_time);
+				    var tripInfo = {
+					    	"orig_hash":orig_hash,
+					    	"dest_hash": dest_hash,
+					    	"orig":orig,
+					    	"dest":dest,
+					    	"cost":trans_list[i].fare,
+					    	"time": start_date.getHours(),
+					    	"day": start_date.getDay()
+						};
+
+					tripList.push(tripInfo);
+				}
+			}
+
+		// TODO hover spend in cluster on mouse over
+		// cluster.on('clustermouseover', function(e) {
+	  //         var popup = L.popup()
+	  //             .setLatLng(c.layer.getLatLng())
+	  //             .setContent(c.layer._childCount +' Locations(click to Zoom)')
+	  //             .openOn(map);
+	  //         }).on('clustermouseout',function(e){
+	  //              map.closePopup();
+	  //         }).on('clusterclick',function(e){
+	  //              map.closePopup();
+	  //         });
+	  //       }); 
+
+			// Put lines between clusters here
+		    clusterGroup.on('animationend', function (e) {
+		    	var zoom = map.getZoom();
+				// console.log("animationend "+zoom);
+				
+				// Loop each data point (trip start or end) on map to generate clusters
+				var clusterMap = {}; 
+				clusterGroup.eachLayer(function(layer){
+				    
+				    // Pull the center of the group in the data point is in
+				    var visibleOne = clusterGroup.getVisibleParent(layer);
+				    
+				    // Ensure cluster if visible and if so get its center to load it
+				    if(visibleOne === undefined || visibleOne === null){
+				    	return;
+				    }
+					var clusterLatlng = visibleOne.getLatLng();
+
+					// Add points to cluster map, pointing latlng to cluster centers
+					var coord_hash = layer._latlng["lng"].toString()+"#"+layer._latlng["lat"].toString();
+					var cluster_hash = clusterLatlng["lng"].toString()+"#"+clusterLatlng["lat"].toString();
+					clusterMap[coord_hash] = [[clusterLatlng["lng"], clusterLatlng["lat"]], cluster_hash];
+
+				});
+				
+				// Aggregate trips between clusters
+				var lineLookup = {};
+				for(var i=0; i<tripList.length; i++){
+					var from_cluster = clusterMap[tripList[i]["orig_hash"]];
+					var to_cluster = clusterMap[tripList[i]["dest_hash"]];
+
+					// check that the cluster centers of this trip have been loaded
+					if(from_cluster === undefined || from_cluster === null){
+				    	continue;
+				    }
+				    if(to_cluster === undefined || to_cluster === null){
+				    	continue;
+				    }
+
+
+					if(from_cluster[1] == to_cluster[1]){
+						// TODO record this in cluster click popup
+						console.log("skipping route within cluster");
+						continue;
+					}
+					
+					var clusters = [from_cluster[1], to_cluster[1]];
+					//clusters.sort(); // Sort trips so To and From don't matter
+					var route_hash = clusters[0]+"#"+clusters[1];
+
+					if(route_hash in lineLookup){
+						lineLookup[route_hash]["count"]+=1;
+						lineLookup[route_hash]["total_cost"]+=tripList[i]["cost"];
+						lineLookup[route_hash]["days"][tripList[i]["day"]][tripList[i]["time"]] += 1; 
+					}else{
+						var lineInfo = {
+						    	"route":[from_cluster[0], to_cluster[0]],
+						    	"total_cost":tripList[i]["cost"],
+						    	"count":1,
+						    	"costs":[
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0)
+						    	],
+						    	"days":[
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0),
+							    	Array.apply(null, Array(24)).map(Number.prototype.valueOf,0)
+						    	]
+							};
+						lineLookup[route_hash] = lineInfo;
+					}
+					lineLookup[route_hash]["days"][tripList[i]["day"]][tripList[i]["time"]] += 1; 
+					lineLookup[route_hash]["costs"][tripList[i]["day"]][tripList[i]["time"]] += tripList[i]["cost"];
+				}
+				
+				// console.log(lineLookup);
+
+				// Clear all old line layers
+				while(route_layers.length != 0){
+					var layer = route_layers.pop();
+					map.removeLayer(layer);
+				}
+
+				// Generate line layer and add to map for each route
+				for (var key in lineLookup) {
+				    // skip loop if the property is from prototype
+				    if (!lineLookup.hasOwnProperty(key)) continue;
+
+				    // Straight line
+					// var latlngs = [[lineLookup[key]["route"][0][1], lineLookup[key]["route"][0][0]], [lineLookup[key]["route"][1][1], lineLookup[key]["route"][1][0]]]
+
+					// TODO Make Arc
+					var latlngs = createArc(
+						[lineLookup[key]["route"][0][1], lineLookup[key]["route"][0][0]], 
+						[lineLookup[key]["route"][1][1], lineLookup[key]["route"][1][0]], 
+						lineLookup[key]["count"],
+						zoom
+					);
+
+					var base = L.polyline(latlngs, 
+						{
+							"weight": lineLookup[key]["count"]*3, // TODO make softmax
+							"color": 'blue',
+							"opacity": 0.25,
+							"total_trips": lineLookup[key]["count"],
+							"days": lineLookup[key]["days"],
+							"costs": lineLookup[key]["costs"],
+							"total_cost": lineLookup[key]["total_cost"]
+						}
+					);
+
+					base.on('mouseover', function(e) {
+					    var layer = e.target;
+
+					    layer.setStyle({
+					        color: 'blue',
+					        opacity: 1
+						});
+					});
+
+					base.on('mouseout', function(e) {
+					    var layer = e.target;
+
+					    layer.setStyle({
+					        color: 'blue',
+					        opacity: 0.25
+						});
+					});
+
+
+					var layer = L.polylineDecorator(base, {
+					    patterns: [
+					        // defines a pattern of 10px-wide dashes, repeated every 20px on the line
+					     //    {offset: '100%', repeat: 0, symbol: L.Symbol.arrowHead({
+						    //     polygon: false,
+						    //     pixelSize: 15,
+						    //     headAngle: 60,
+						    //     pathOptions: {
+						    //     	//weight: 3,
+						    //         stroke: true
+						    //     }
+						    // })}
+						    {offset: 0, repeat: 50, symbol: L.Symbol.arrowHead({pixelSize: 8, polygon: false, pathOptions: {stroke: true}})}
+					    ]
+					});
+
+
+
+					// TODO Set to highlight for line on hover
+					// TODO show cost and # of rides on hover
+					// layer.on('hover', function(e) {
+
+					// });
+					
+					//Set to show visualization on hover
+					base.on('click', function(e) {
+					    var graph_popup = L.popup()
+					     .setLatLng(e.latlng) 
+					     .setContent('<div id="chart-tab"></div>') // TODO change offset on graph popup to center over click 
+					     .openOn(map);
+					   
+
+					   //console.log(e.target.options);
+					   // TODO add timeseries high chart as other tab to show spend over time
+					   // TODO create chart on cash spent over times
+					   //create highchart
+					   $('#chart-tab').highcharts({
+						   chart: {
+						        type: 'column'
+						    },
+						    title: {
+						        text: 'Costs For '+e.target.options['total_trips']+' Trips Over This Route'
+						    },
+						    xAxis: {
+						        // categories: [
+						        //     'Sun',
+						        //     'Mon',
+						        //     'Tue',
+						        //     'Wed',
+						        //     'Thu',
+						        //     'Fri',
+						        //     'Sat'
+						        // ],
+						        categories: [
+						            '12AM',
+						            '1AM',
+						            '2AM',
+						            '3AM',
+						            '4AM',
+						            '5AM',
+						            '6AM',
+						            '7AM',
+						            '8AM',
+						            '9AM',
+						            '10AM',
+						            '11AM',
+						            '12PM',
+						            '1PM',
+						            '2PM',
+						            '3PM',
+						            '4PM',
+						            '5PM',
+						            '6PM',
+						            '7PM',
+						            '8PM',
+						            '9PM',
+						            '10PM',
+						            '11PM'
+						        ],
+						        crosshair: true
+						    },
+						    yAxis: {
+						        min: 0,
+						        title: {
+						            text: 'Number of Rides'
+						        },
+						        stackLabels: {
+						            enabled: true,
+						        }
+						    },
+						    plotOptions: {
+						        column: {
+						            stacking: 'normal',
+						        }
+						    },
+						    tooltip: {
+							    formatter: function() {
+							        return '<b>$' + this.y + '</b> of <b>$' + e.target.options['total_cost'] + '</b>, spent on this route.'
+							    }
+						    },
+						    series: [{
+						        name: 'Sun',
+						        data:  e.target.options['costs'][0]
+						    }, {
+						        name: 'Mon',
+						        data: e.target.options['costs'][1]
+						    }, {
+						        name: 'Tue',
+						        data: e.target.options['costs'][2]
+						    }, {
+						        name: 'Wed',
+						        data: e.target.options['costs'][3]
+						    }, {
+						        name: 'Thu',
+						        data: e.target.options['costs'][4]
+						    }, {
+						        name: 'Fri',
+						        data: e.target.options['costs'][5]
+						    }, {
+						        name: 'Sat',
+						        data: e.target.options['costs'][6]
+						    }]
+		   			  });
+					});
+				
+					layer.addTo(map);
+					base.addTo(map);
+					route_layers.push(layer);
+					route_layers.push(base);
+
+				}
+
+			});
+
+
+			var first_date = new Date(from_val);
+			var last_date = new Date(to_val);
+			$('#spend').text("Spent $"+Math.round(totalSpend * 100) / 100+" on "+totalTrips+" rides between "+first_date.toLocaleDateString("en-US")+" and "+last_date.toLocaleDateString("en-US"));
+
+		}
+
+		// TODO fix
+		// Utility function to generate smooth arc between two points
+		function createArc(start, end, size, zoom){
+			var epsilon = 0.01; // About 10000 meters
+			var arc = [];
+			var x0 = start[0];
+			var y0 = start[1];
+			var x1 = end[0];
+			var y1 = end[1];
+			if(x0 >= x1){ // Only select one of an overlapping pair
+				y1 += epsilon * size/zoom;
+				y0 += epsilon * size/zoom;
+			}else{
+				y1 -= epsilon * size/zoom;
+				y0 -= epsilon * size/zoom;
+			}
+			arc.push([x0, y0]);
+			arc.push([x1, y1]);
+			return arc;
+		}
+
+
+  	});
+
+
+
+</script>
+

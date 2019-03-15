@@ -1,0 +1,806 @@
+<p>This App allows you to explore the data that Snapchat has collected on you, stored on you, and publically exposed about you in an intuitive and interactive way.</p>
+<h4>Time Range of Data to Visualize</h4>
+<div id="footprint">
+</div>
+<h4>Addiction Profile</h4>
+<p>A Chart aggregating all your interactions on Snapchat over time to show you know if you are becoming more or less addicted to Snap. Click on any Series at the bottom of the Chart to enable or disable it.</p>
+<div id="footprint-main">
+<h4>Social Profile</h4>
+<p>A Bubble Graph aggregating all they Snaps you sent to and recieved from other users. Hover over the Bubbles or Edges of the Graph to view exactly how many Snaps they represent.</p>
+<div id="footprint-social">
+</div>
+<h4>Public Location Profile</h4>
+<p>A Map vizualizing location trail that Snapchat stores on you and makes publically available through their SnapMaps features if you have not, which is on by default if you have not <a href="https://www.wired.com/story/how-to-turn-off-snapchat-snap-maps/"> disabled it</a>. Click on any Icon on the Map to view the time it was captured by Snapchat</p>
+<!-- Include profile here -->
+<div id="footprint-profile">
+</div>
+
+<link rel="stylesheet" href="/static/apps/venmo_trail/css/jquery-ui.css">
+
+<link rel="stylesheet" href="/static/apps/uber_tracks/css/mapbox.css">
+
+<link rel="stylesheet" href="/static/apps/data_gram/css/content.css">
+
+<script src="/static/apps/venmo_trail/js/jquery-ui.js"></script>
+<script src="/static/apps/venmo_trail/js/jquery.easing.min.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.layout.js"></script>
+<script src="/static/apps/venmo_trail/js/d3.geom.js"></script>
+<script src="/static/apps/venmo_trail/js/highcharts.js"></script>
+<script src="/static/apps/uber_tracks/js/mapbox.js"></script>
+<script src="/static/apps/uber_tracks/js/leaflet-heat.js"></script>
+<script src="/static/apps/uber_tracks/js/leaflet-polylinedecorator.js"></script>
+
+<script type="text/javascript">
+
+	// Map Variables
+	var accessToken = 'pk.eyJ1IjoiYXJhbmtoYW5uYSIsImEiOiI3NjkyYzU3ODQwOTc1NzRiODYxN2E5NmJiODdjOTgzYyJ9.Lh8kTSMXR8K68UsVtrB_Xg'
+	L.mapbox.accessToken = accessToken;
+	
+	// Map object
+	var map = null;
+	var locationHeat = null;
+	var polylines = [];
+
+	var location_list = [];
+	var chat_list = [];
+	var user_chat_list = []; // the messages with "To" (and ignore with "From")
+	var user_snap_list = []; // the Snaps with "To" (and ignore with "From")
+	var ad_interaction_list = [];
+
+	// Date range of the data to visualize
+	var to_val = Date.now();
+	var from_val = Date.now();
+
+	// The datetime of the oldest transaction stored locally
+	var oldest_retrieved = Date.now();
+	var latest_retrieved = null;
+
+	// Is the bubble graph or the chart the currently selected visualization
+	var loading = false;
+
+	// The JSON for the currently selected user
+	var current_user = null;
+	var ad_profile = null;
+
+	$( document ).ready(function() {
+
+		function extractChat(chat){
+			chat['created_time'] = Date.parse(chat['Created']);
+			return chat;
+		}
+
+		function extractLocation(loc){
+			loc['created_time'] = Date.parse(loc['Time']);
+			return loc;
+		}
+
+		function extractUserSnaps(messages){
+			var user_snaps = [];
+			$.each(messages, function(index, snap){
+				if(snap["type"] == "SNAP" && "To" in snap){
+					user_snaps.push(snap);
+				}
+			});
+			return user_snaps;
+		}
+
+		function extractUserChats(messages){
+			var user_chats = [];
+			$.each(messages, function(index, chat){
+				if(chat["type"] == "CHAT" && "To" in chat){
+					user_chats.push(chat);
+				}
+			});
+			return user_chats;
+		}
+
+		function extractAdInteraction(ad_interactions){
+			var interactions = [];
+			$.each(ad_interactions, function(index, interaction){
+				interaction['created_time'] = Date.parse(interaction['Date']);
+			});
+			return interactions;
+		}
+
+		$.get("main_user", function( user_data ) {	
+			current_user = JSON.parse(user_data);
+			console.log(current_user);
+
+			$.get("ad_profile", function( ad_data ) {	
+				ad_profile = JSON.parse(ad_data);
+				ad_interactions = extractAdInteraction(ad_profile['ad_interactions'])
+				console.log(ad_profile);
+
+				$.get("chats", function( chat_data ) { // my posts
+					var chats = JSON.parse(chat_data);
+					$.each(chats, function(index, raw_chat){
+						var chat = extractChat(raw_chat);
+						chat_list.push(chat);
+						if(oldest_retrieved > chat.created_time){
+							oldest_retrieved = chat.created_time;
+						}
+						if(latest_retrieved === null || latest_retrieved < chat.created_time){
+							latest_retrieved = chat.created_time;
+						}
+					});
+					user_snap_list = extractUserSnaps(chat_list);
+					user_chat_list = extractUserChats(chat_list);
+					console.log(chat_list);
+
+					$.get("locations", function( loc_data ) { // all conversation data
+						var locations = JSON.parse(loc_data);
+						$.each(locations, function(index, raw_loc){
+							var location = extractLocation(raw_loc);
+							location_list.push(location);
+							if(oldest_retrieved > location.created_time){
+								oldest_retrieved = location.created_time;
+							}
+							if(latest_retrieved === null || latest_retrieved < location.created_time){
+								latest_retrieved = location.created_time;
+							}
+						});
+						console.log(location_list);
+
+						$("#to").datepicker("setDate", new Date(latest_retrieved));
+			        	$("#from").datepicker("setDate", new Date(oldest_retrieved));
+			        	from_val = oldest_retrieved;
+			        	to_val = latest_retrieved;
+			        	renderInteractionChart(oldest_retrieved, latest_retrieved);
+			        	renderLocationMap(oldest_retrieved, latest_retrieved);			        	
+						renderChatBubbles(oldest_retrieved, latest_retrieved)
+					});
+				});
+			});
+		});
+
+		// Build the vizualisation
+		var dateTab = document.createElement('div');
+		dateTab.id = 'date-tab';
+		$('#date-tab').css('height', '400px');
+		$('#date-tab').css('width', '100%');
+		$('#footprint').prepend(dateTab);
+
+		// Set up date selectors
+		var fromDate =  document.createElement('input');
+		fromDate.id = 'from';
+		$('#date-tab').append(fromDate);
+		var toDate =  document.createElement('input');
+		toDate.id = 'to';
+		$('#date-tab').append(toDate);
+
+		// set up rerendering on date change
+		$( "#from" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, true);
+    			}
+    		}
+  		});
+		$( "#to" ).datepicker({
+			onSelect: function(dateText) {
+				if(!loading){
+    				rerender(dateText, false);
+    			}
+    		}
+  		});
+
+		// Insert div for map
+		var mapTab =  document.createElement('div');
+		mapTab.id = 'map';
+		$('#footprint-profile').prepend(mapTab);
+
+		// Make switcher for "hotspot" map
+		map = L.mapbox.map('map', 'mapbox.dark');
+
+
+		// Creates animations
+		function rerender(dateText, isFrom){
+			if(isFrom != null && dateText != null){
+				var date = Date.parse(dateText);
+				if(isFrom){
+					from_val = date;
+				}else{
+					to_val = date;
+				}
+			}
+			// Automatically render with correct function, parameter values and order
+			var diff = to_val - from_val;
+
+			if(diff > 0){
+				renderInteractionChart(from_val, to_val);
+				renderLocationMap(from_val, to_val);
+				renderChatBubbles(from_val, to_val)
+			}else if(diff < 0){
+				renderInteractionChart(to_val, from_val);
+				renderLocationMap(to_val, from_val);	
+				renderChatBubbles(to_val, from_val)
+			}else{
+				renderInteractionChart(from_val, to_val+oneDay);
+				renderLocationMap(from_val, to_val+oneDay);
+				renderChatBubbles(from_val, to_val+oneDay)
+			}
+		}
+	});
+
+	// Generate get a new date one jump away from the old_date
+	function getNewDate(resolution, jump, old_date){
+		cur_date = new Date(old_date);
+		if(resolution == 'd'){
+			return cur_date.setDate(cur_date.getDate() + jump);
+		}else if(resolution == 'h'){
+			return cur_date.setHours(cur_date.getHours() + jump);
+		}else if(resolution == 'w'){
+			return cur_date.setDate(cur_date.getDate() + (jump*7));
+		}else if(resolution == 'm'){
+			return cur_date.setDate(cur_date.getDate() + (jump*30));
+		}
+	}
+
+	// Generate a range of dates with a certain resolution bewteen start and end dates
+	function generateRange(from, to, resolution){
+		var range = [];
+		var end_date =  new Date(getNewDate(resolution, 1, to));
+		var cur_date = new Date(from);
+		while(cur_date.getTime() < end_date.getTime()){
+			var mini_range = [cur_date];
+			cur_date =  new Date(getNewDate(resolution, 1, cur_date.getTime()));
+			mini_range.push(cur_date);
+			if(mini_range[1].getTime() < to){
+				range.push(mini_range);
+			}else{
+				mini_range[1] = new Date(to);
+				range.push(mini_range);
+				break;
+			}
+		}
+		return range;
+	}
+
+	// Turns a range of date objects into human readable string
+	function toRangeString(range, resolution){
+		var start_range = range[0].toString().split(" ");
+		var end_range = range[1].toString().split(" ");
+		if(resolution == 'h'){
+			return start_range[1] +" "+ start_range[2] +" "+start_range[4]+" to "+end_range[1] +" "+ end_range[2]+" "+end_range[4];
+		}else{
+			return start_range[1] +" "+ start_range[2] + " to "+end_range[1] +" "+ end_range[2];
+		}
+	}
+
+
+	// Aggregate messages, interactions, chats to get "addiction" over time
+	function renderInteractionChart(from, to){
+
+		var diff = to - from;
+		var oneDay = 24*60*60*1000; // hours*minutes*seconds*milliseconds
+
+		// Set range resolution appropriately
+		var diffDays = Math.round(Math.abs(diff)/(oneDay));
+		var resolution = 'w';
+		if(diffDays <= 2){
+			resolution = 'h';
+		}else if(diffDays <= 31){
+			resolution = 'd';
+		}else if(diffDays <= 364){
+			resolution = 'w';
+		}else{
+			resolution = 'm';
+		}
+
+		// Remove old tab
+		$('#interaction-chart').remove();
+
+		// Insert div
+		var chartTab =  document.createElement('div');
+		chartTab.id = 'interaction-chart';
+		$('#footprint-main').prepend(chartTab);
+
+		var current_range = generateRange(from, to, resolution);
+		
+		var interaction_lists = [
+			[user_snap_list, "Snaps"],
+			[user_chat_list, "Messages"],
+			[ad_interaction_list, "Ad Interactions"]
+		];
+
+		// Load data into chart form
+		var interaction_dict = {};
+
+		$.each(interaction_lists, function(index, interaction_list){
+			var series = interaction_list[1];
+			
+			// Set up time series
+			interaction_dict[series] = [];
+			for(var i=0; i<current_range.length; i++){
+				interaction_dict[series].push(0);
+			}
+
+			$.each(interaction_list[0], function(index, interaction){
+				// Bucket each interaction in range
+				for(var i=0; i<current_range.length; i++){
+					if(interaction.created_time >= current_range[i][0].getTime() && interaction.created_time < current_range[i][1].getTime()){
+						 interaction_dict[series][i] += 1;
+						 break;
+					}
+				}
+			});
+		});
+
+		var display_series = [];
+		for (var key in interaction_dict) {
+			var display_interaction =  {'name': key, 'data': interaction_dict[key]};
+			display_series.push(display_interaction);
+		}
+
+		var categories = [];
+		for (var key in current_range) {
+			categories.push(toRangeString(current_range[key], resolution));
+		}
+
+		// TODO click to deep dive on summary interactions
+		$('#interaction-chart').highcharts({
+		    chart: {
+		        type: 'area'
+		    },
+		    title: {
+		        text: 'Your Snapchat Addiction'
+		    },
+		    subtitle: {
+		        text: 'Aggregate Snap activity over time'
+		    },
+		    xAxis: {
+		        categories: categories,
+		        tickmarkPlacement: 'on',
+		        title: {
+		            enabled: false
+		        }
+		    },
+		    yAxis: {
+		        title: {
+		            text: 'Occurences'
+		        },
+		    },
+		    plotOptions: {
+		        area: {
+		            stacking: 'normal',
+		            lineColor: '#666666',
+		            lineWidth: 1,
+		            marker: {
+		                lineWidth: 1,
+		                lineColor: '#666666'
+		            }
+		        }
+		    },
+		    series: display_series
+		});
+
+	}
+
+
+	// TODO switch between heatmap and maruaders trace
+	function renderLocationMap(from, to){
+
+		var is_heat = false;
+
+        // Create counter and update it to most recent
+		// var counterDiv = document.createElement('div');
+		// counterDiv.id = 'counter';
+		// $('#button-container').append(counterDiv);
+		// $('#counter').text('Points: 0');
+		for(var i=0; i<polylines.length; i++){
+			polylines[i].remove();
+		}
+
+		// Creates a new map layer for a user's location
+		function createUserLayer(latitude, longitude, time) {
+			var date =  new Date(time);
+			var layer = L.mapbox.featureLayer();
+			var geoJSON = {
+			    type: 'Feature',
+			    geometry: {
+			        type: 'Point',
+			        // coordinates here are in longitude, latitude order
+			        coordinates: [
+			          longitude,
+			          latitude 
+			        ]
+			    },
+			    properties: {
+			        title: "Recorded Location",
+			        description: 'Recorded at: '+date.toGMTString(),
+			        icon: {
+			        	className: "dot-"+time,
+			        	iconUrl: "https://i0.wp.com/nicolesyblog.com/wp-content/uploads/2016/05/snapcode.png?ssl=1",
+			        	iconSize: [20, 20],
+			        	iconAnchor: [10,10],
+			        	popupAnchor:[0,-10]
+			        }
+			    }
+			}
+
+			// Set pictures as icons
+			layer.on("layeradd", function(e) {
+			    var marker = e.layer;
+			    var feature = marker.feature;
+			    marker.setIcon(L.icon(feature.properties.icon));
+			});
+
+			// Transition to zoom in on user
+			// layer.on('click', function(e) {
+			// });
+
+			// Add layer's Json
+			layer.setGeoJSON(geoJSON);
+
+			// Add layers to map list
+			return {
+				layer: layer,
+				time: time,
+				latlng: {
+					lat: latitude,
+					lng: longitude
+				}
+			};
+		}
+
+		function updateOpacities(layers) {
+			var min = Number.MAX_VALUE;
+			var max = 0;
+			for(var i=0; i<layers.length; i++){
+				if(layers[i]["time"] > max){
+					max = layers[i]["time"];
+				}
+				if(layers[i]["time"] < min){
+					min = layers[i]["time"];
+				}
+			}
+
+			for(var i=0; i<layers.length; i++){
+				// Opacity is set to % of total range with 0.3 as floor
+				var calcOpacity = (((layers[i]["time"] - min)/(max - min))*0.7) + 0.3;
+				$('.dot-'+layers[i]["time"]).css({opacity: calcOpacity});
+			}
+		}
+
+		// Focus on a specific user and display just their search history on the map
+		function renderTrail(layers) {
+			var line = [];
+			var polyline_options = {
+				color: '#FFFC00'
+			};
+			var sorted = layers.sort(function(a,b) {return a['time'] - b['time']});
+			for(var i=0; i<sorted.length; i++){
+				polylines.push(layers[i]["layer"]);
+				layers[i]["layer"].addTo(map);
+				line.push(layers[i]["latlng"]);
+			}
+			var polyline = L.polyline(line, polyline_options);
+			polylines.push(polyline);
+			polyline.addTo(map);
+			var polyarrow = L.polylineDecorator(polyline, {
+						    patterns: [
+							    {offset: 0, repeat: 50, symbol: L.Symbol.arrowHead({pixelSize: 8, polygon: false, pathOptions: {stroke: true, color:'#FFFFFF'}})}
+						    ]
+						});
+			polyarrow.addTo(map);
+			polylines.push(polyarrow);
+
+			updateOpacities(layers);
+		}
+
+		var latlngs = [];
+		var layers = [];
+		$.each(location_list, function(index, loc){
+			if(loc.created_time >= from && loc.created_time < to){
+				var orig = [loc.lat, loc.lng];
+				latlngs.push(orig);
+				layers.push(createUserLayer(loc.lat, loc.lng, loc.created_time));
+			}
+		});
+
+		if(is_heat){
+			if(!(locationHeat == null)){
+				locationHeat.setLatLngs(latlngs);
+				locationHeat.redraw();
+			}else{
+				locationHeat = L.heatLayer(latlngs, {
+			        radius : 15, // default value
+			        blur : 10, // default value
+			        gradient : {1: 'green'}, // Values can be set for a scale of 0-1
+			        minOpacity: 0.7
+		    	}).addTo(map);
+			}
+		}else{
+			renderTrail(layers);
+		}
+
+	}
+
+
+	function renderChatBubbles(from, to){
+
+		// Remove old tab
+		$('#bubble-tab').remove();
+
+		// Insert div for bubbles
+		var bubbleTab =  document.createElement('div');
+		bubbleTab.id = 'bubble-tab';
+		$('#footprint-social').prepend(bubbleTab);
+
+		var ranges = generateRange(from, to, 'd');
+
+		// Load data into graph data structures
+		var username = current_user['account']['Basic Information']['Username']
+
+	    var dataset = {nodes: [{name: username, amt: 1, picture: "https://i0.wp.com/nicolesyblog.com/wp-content/uploads/2016/05/snapcode.png?ssl=1"}], edges: []};
+
+	    // TODO limit to top N
+		$.each(chat_list, function(index, chat){
+			// Aggregates all user's transactions with the current user in the set time range
+			if(chat.created_time >= ranges[0][0].getTime() && chat.created_time < ranges[ranges.length-1][1].getTime()){
+				index = -1;
+				// Augment node
+				for(var i = 0; i<dataset.nodes.length; i++){
+					if('From' in chat && dataset.nodes[i]['name'] == chat['From']){
+						index = i;
+						break;
+					}
+					else if(dataset.nodes[i]['name'] == chat['To']){
+						index = i;
+						break;
+					}
+				}
+				if(index == -1){
+					if('From' in chat){
+						var chat_username = chat['From']
+					}else{
+						var chat_username = chat['To']
+					}
+					dataset.nodes.push({name: chat_username, amt: 0, picture: "http://foxytechtips.com/wp-content/uploads/2017/12/image13.png"});
+					index = dataset.nodes.length-1;
+				}
+				dataset.nodes[index].amt += 1;
+				dataset.nodes[0].amt += 1;
+
+				edge_index = -1;
+				for(var i = 0; i<dataset.edges.length; i++){
+					if('From' in chat){
+						if(dataset.edges[i].target == index){
+							edge_index = i;
+							break;
+						}
+					}else{
+						if(dataset.edges[i].source == index){
+							edge_index = i;
+							break;
+						}
+					}
+				}
+				if(edge_index == -1){
+					if('From' in chat){
+						dataset.edges.push({source: 0, target: index, weight: 0});
+					}else{
+						dataset.edges.push({source: index, target: 0, weight: 0});
+					}
+					edge_index = dataset.edges.length-1;
+				}
+				dataset.edges[edge_index].weight += 1
+			}
+		});	
+		
+		// Aribitary size of canvas and line scaling size
+		var w = 1000,
+	    h = 600;
+	    var lineSizeScale = Math.min(dataset.nodes.length * 30, 400);
+
+	    var nodes = dataset.nodes;
+		var force = d3.layout.force()
+		    .nodes(nodes)
+		    .links(dataset.edges)
+		    .size([w, h])
+		    .linkDistance(lineSizeScale)
+		    .charge(-300)
+		    .on("tick", tick)
+		    .start();
+
+		var svg = d3.select("#bubble-tab").append("svg:svg")
+		    .attr("width", w)
+		    .attr("height", h);
+
+		// Per-type markers, as they don't inherit styles.
+		svg.append("svg:defs").selectAll("marker")
+		    .data(["suit", "licensing", "resolved"])
+		    .enter().append("svg:marker")
+		    .attr("id", String)
+		    .attr("viewBox", "0 -5 10 10")
+		    .attr("refX", 1.5)
+		    .attr("refY", -1.5)
+		    .attr("markerWidth", 6)
+		    .attr("markerHeight", 6)
+		    .attr("orient", "auto")
+		    .append("svg:path")
+		    .attr("d", "M0,-5L10,0L0,5");
+
+		var path = svg.append("svg:g").selectAll("path.link")
+		    .data(force.links())
+		    .enter().append("svg:path")
+		    .attr("class", function (d) {
+		    	if(d.source.index == 0){
+		    		return "link from"; 
+		    	}
+		    	else{
+		    		return "link to";
+		    	}
+			})
+			.attr("id", function (d) {
+				if(d.source.index == 0){
+		    		return "from-edge-"+d.target.index; 
+		    	}
+		    	else{
+		    		return "to-edge-"+d.source.index;
+		    	}
+			})
+			.style("stroke-width", function(d) {
+		    	return Math.atan(d.weight/20)*(120/(Math.PI/2));
+		    	// return 3*Math.min(d.weight, 80); // Change line size
+		    })
+		    .on("mouseover", function(d) {
+		    	var id;
+		    	if(d.source.index == 0){
+		    		id = "#from-edge-"+d.target.index; 
+		    	}
+		    	else{
+		    		id = "#to-edge-"+d.source.index;
+		    	}
+		    	$(id).css("stroke-opacity", "1");
+		    })
+		    .on("mouseout", function(d) {
+		    	var id;
+		    	if(d.source.index == 0){
+		    		id = "#from-edge-"+d.target.index; 
+		    	}
+		    	else{
+		    		id = "#to-edge-"+d.source.index;
+		    	}
+		    	$(id).css("stroke-opacity", "0.5");
+		    });
+
+		    path.append("svg:title")
+		    .text(function(d) {
+		    	if(d.source.index == 0) {
+		    		return d.weight +" Snapchats From "+dataset.nodes[d.target.index].name;
+		    	} else {
+		    		return d.weight +" Snapchats To "+dataset.nodes[d.source.index].name;
+		    	}
+		    });
+
+		var markerPath = svg.append("svg:g").selectAll("path.marker")
+		    .data(force.links())
+		    .enter().append("svg:path")
+		    .attr("class", function (d) {
+		    	if(d.source.index == 0){
+		    		return "marker_only from"; 
+		    	}
+		    	else{
+		    		return "marker_only to";
+		    	}
+			})
+		    .style("stroke-width", function(d) { 
+		    	return Math.atan(d.weight/20)*(120/(Math.PI/2));
+		    	// return 3*Math.min(d.weight, 80); // Change line size
+		    });
+
+
+		var defs = svg.append("defs").attr("id", "imgdefs");
+
+		var patterns = d3.select("#imgdefs").selectAll("pattern")
+							.data(force.nodes())
+							.enter().append("pattern")
+	                        .attr("id", function(d, idx) {
+	                        	return "profilePicPattern" + idx;
+	                        })
+	                        .attr("height", 1)
+	                        .attr("width", 1)
+	                        .attr("x", "0")
+	                        .attr("y", "0")
+
+
+
+	    var pictureSizeScale = 12; // Change scale (linear scale)
+	    
+	    for(var i = 0; i < patterns[0].length; i++) {
+	    	var d = force.nodes()[i];
+	    	d3.select(patterns[0][i]).append("image")
+	     	.attr("x", 0)
+	     	.attr("y", 0)
+	     	.attr("height", 10 + pictureSizeScale * Math.min(Math.sqrt(d.amt), 15)) // Change circle size
+	     	.attr("width", 10 + pictureSizeScale * Math.min(Math.sqrt(d.amt), 15)) // Change circle size
+	     	.attr("preserveAspectRatio", "none")
+	     	.attr("xlink:href", d.picture);
+	    }
+
+		var circle = svg.append("svg:g").selectAll("circle")
+		    .data(force.nodes())
+		    .enter().append("svg:g")
+		    .call(force.drag)
+		    .append("circle")
+		    .attr("r", function(d) {
+		    	return (10+ Math.min(Math.sqrt(d.amt), 15) * pictureSizeScale)/2; // Change circle size
+		    })
+		    .attr("fill", function(d, idx) {
+		    	return "url(#profilePicPattern"+idx+")";
+		    })
+		    .attr("class", "peopleCircle")
+		    .on("mouseover", function(d) {
+		    	$('#from-edge-'+d.index).css("stroke-opacity", "1");
+		    	$('#to-edge-'+d.index).css("stroke-opacity", "1");
+		    })
+		    .on("mouseout", function(d) {
+		    	$('#from-edge-'+d.index).css("stroke-opacity", "0.5");
+		    	$('#to-edge-'+d.index).css("stroke-opacity", "0.5");
+		    });
+
+		circle.append("svg:title")
+		    .text(function(d) {
+		    	return d.amt+" interactions with "+d.name;
+		    });
+
+		var text = svg.append("svg:g").selectAll("g")
+		    .data(force.nodes())
+		    .enter().append("svg:g");
+
+		// A copy of the text with a thick white stroke for legibility.
+		text.append("svg:text")
+		    .attr("x", 8)
+		    .attr("y", ".31em")
+		    .attr("class", "shadow")
+		    .text(function (d) {
+		    return d.name;
+		});
+
+		text.append("svg:text")
+		    .attr("x", 8)
+		    .attr("y", ".31em")
+		    .text(function (d) {
+		    return d.name;
+		});
+
+		// Use elliptical arc path segments to doubly-encode directionality (thanks to stack overflow)
+		function tick() {
+
+		    path.attr("d", function (d) {
+		        var dx = d.target.x - d.source.x,
+		            dy = d.target.y - d.source.y,
+		            dr = Math.sqrt(dx * dx + dy * dy);
+		        return "M" + d.source.x + "," + d.source.y + "A" + dr + "," + dr + " 0 0,1 " + d.target.x + "," + d.target.y;
+		    });
+
+		    markerPath.attr("d", function (d) {
+		        var dx = d.target.x - d.source.x,
+		            dy = d.target.y - d.source.y,
+		            dr = Math.sqrt(dx * dx + dy * dy);
+
+		        var endX = (d.target.x + d.source.x) / 2;
+		        var endY = (d.target.y + d.source.y) / 2;
+		        var len = dr - ((dr / 2) * Math.sqrt(3));
+		        endX = endX + (dy * len / dr);
+		        endY = endY + (-dx * len / dr);
+
+		        return "M" + d.source.x + "," + d.source.y + "A" + dr + "," + dr + " 0 0,1 " + endX + "," + endY;
+		    });
+
+		    circle.attr("transform", function (d) {
+		        return "translate(" + d.x + "," + d.y + ")";
+		    });
+
+		    text.attr("transform", function (d) {
+		        return "translate(" + d.x + "," + d.y + ")";
+		    });
+		}
+	}
+
+	// TODO Make bubble for ad interactions
+
+
+</script>
